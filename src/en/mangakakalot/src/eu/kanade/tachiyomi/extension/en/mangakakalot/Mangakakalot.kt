@@ -1,13 +1,18 @@
 package eu.kanade.tachiyomi.extension.en.mangakakalot
 
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.text.ParseException
@@ -56,10 +61,26 @@ class Mangakakalot : ParsedHttpSource() {
     override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        // Site ignores everything after the first word
-        val substringBefore = query.replace(" ", "_").replace(",", "_").replace(":", "_")
-        val url = "$baseUrl/search/$substringBefore?page=$page"
-        return GET(url, headers)
+        val url = HttpUrl.parse("$baseUrl/manga_list")!!.newBuilder()
+        url.addQueryParameter("page", page.toString())
+
+        filters.forEach { filter ->
+            when (filter) {
+                is SortFilter -> {
+                    url.addQueryParameter("type", filter.toUriPart())
+                }
+                is StatusFilter -> {
+                    url.addQueryParameter("state", filter.toUriPart())
+                }
+                is GenreFilter -> {
+                    url.addQueryParameter("category", filter.toUriPart())
+                }
+            }
+        }
+
+        return if (query.isNotBlank()) {
+            GET("$baseUrl/search/${normalizeSearchQuery(query)}?page=$page")
+        } else GET(url.build().toString(), headers)
     }
 
     override fun searchMangaSelector() = ".panel_story_list .story_item"
@@ -67,6 +88,22 @@ class Mangakakalot : ParsedHttpSource() {
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
 
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
+
+    override fun searchMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangaSelector = if (document.select(searchMangaSelector()).isNotEmpty()) {
+            searchMangaSelector()
+        } else {
+            popularMangaSelector()
+        }
+        val mangas = document.select(mangaSelector).map { element ->
+            searchMangaFromElement(element)
+        }
+        val hasNextPage = searchMangaNextPageSelector().let { selector ->
+            document.select(selector).first()
+        } != null
+        return MangasPage(mangas, hasNextPage)
+    }
 
     override fun mangaDetailsRequest(manga: SManga): Request {
         if (manga.url.startsWith("http")) {
@@ -168,6 +205,89 @@ class Mangakakalot : ParsedHttpSource() {
 
     override fun imageUrlParse(document: Document): String = throw  UnsupportedOperationException("No used")
 
-    override fun getFilterList() = FilterList()
+    // Based on change_alias JS function from website
+    private fun normalizeSearchQuery(query: String): String {
+        var str = query.toLowerCase()
+        str = str.replace("à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ".toRegex(), "a")
+        str = str.replace("è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ".toRegex(), "e")
+        str = str.replace("ì|í|ị|ỉ|ĩ".toRegex(), "i")
+        str = str.replace("ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ".toRegex(), "o")
+        str = str.replace("ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ".toRegex(), "u")
+        str = str.replace("ỳ|ý|ỵ|ỷ|ỹ".toRegex(), "y")
+        str = str.replace("đ".toRegex(), "d")
+        str = str.replace("""!|@|%|\^|\*|\(|\)|\+|=|<|>|\?|/|,|\.|:|;|'| |"|&|#|\[|]|~|-|$|_""".toRegex(), "_")
+        str = str.replace("_+_".toRegex(), "_")
+        str = str.replace("""^_+|_+$""".toRegex(), "")
+        return str
+    }
 
+    override fun getFilterList() = FilterList(
+            Filter.Header("NOTE: Ignored if using text search!"),
+            Filter.Separator(),
+            SortFilter(),
+            StatusFilter(),
+            GenreFilter()
+    )
+
+    private class SortFilter : UriPartFilter("Sort", arrayOf(
+            Pair("latest", "Latest"),
+            Pair("newest", "Newest"),
+            Pair("topview", "Top read")
+    ))
+
+    private class StatusFilter : UriPartFilter("Status", arrayOf(
+            Pair("all", "ALL"),
+            Pair("completed", "Completed"),
+            Pair("ongoing", "Ongoing"),
+            Pair("drop", "Dropped")
+    ))
+
+    private class GenreFilter : UriPartFilter("Category", arrayOf(
+            Pair("all", "ALL"),
+            Pair("2", "Action"),
+            Pair("3", "Adult"),
+            Pair("4", "Adventure"),
+            Pair("6", "Comedy"),
+            Pair("7", "Cooking"),
+            Pair("9", "Doujinshi"),
+            Pair("10", "Drama"),
+            Pair("11", "Ecchi"),
+            Pair("12", "Fantasy"),
+            Pair("13", "Gender bender"),
+            Pair("14", "Harem"),
+            Pair("15", "Historical"),
+            Pair("16", "Horror"),
+            Pair("45", "Isekai"),
+            Pair("17", "Josei"),
+            Pair("44", "Manhua"),
+            Pair("43", "Manhwa"),
+            Pair("19", "Martial arts"),
+            Pair("20", "Mature"),
+            Pair("21", "Mecha"),
+            Pair("22", "Medical"),
+            Pair("24", "Mystery"),
+            Pair("25", "One shot"),
+            Pair("26", "Psychological"),
+            Pair("27", "Romance"),
+            Pair("28", "School life"),
+            Pair("29", "Sci fi"),
+            Pair("30", "Seinen"),
+            Pair("31", "Shoujo"),
+            Pair("32", "Shoujo ai"),
+            Pair("33", "Shounen"),
+            Pair("34", "Shounen ai"),
+            Pair("35", "Slice of life"),
+            Pair("36", "Smut"),
+            Pair("37", "Sports"),
+            Pair("38", "Supernatural"),
+            Pair("39", "Tragedy"),
+            Pair("40", "Webtoons"),
+            Pair("41", "Yaoi"),
+            Pair("42", "Yuri")
+    ))
+
+    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>) :
+        Filter.Select<String>(displayName, vals.map { it.second }.toTypedArray()) {
+        fun toUriPart() = vals[state].first
+    }
 }

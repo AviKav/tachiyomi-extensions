@@ -188,11 +188,11 @@ class MangaRock : HttpSource() {
     private fun getMangaApiRequest(manga: SManga): Request {
         // Handle older entries with API URL ("/info?oid=mrs-series-...")
         if (manga.url.startsWith("/info")) {
-            return GET("$apiUrl${manga.url}&country=", headers)
+            return GET("$apiUrl${manga.url}&Country=", headers)
         }
 
         val oid = manga.url.substringAfterLast("/")
-        return GET("$apiUrl/info?oid=$oid&country=", headers)
+        return GET("$apiUrl/info?oid=$oid&Country=", headers)
     }
 
     override fun mangaDetailsParse(response: Response) = SManga.create().apply {

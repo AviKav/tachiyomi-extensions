@@ -44,7 +44,8 @@ fun getAllFoolSlide(): List<Source> {
             HentaiCafe(),
             ShoujoSense(),
             TheCatScans(),
-            ShoujoHearts()
+            ShoujoHearts(),
+            ZandynoFansub()
     )
 }
 
@@ -70,7 +71,7 @@ class TheCatScans : FoolSlide("The Cat Scans", "https://reader2.thecatscans.com/
 
 class HelveticaScans : FoolSlide("Helvetica Scans", "https://helveticascans.com", "en", "/r")
 
-class SenseScans : FoolSlide("Sense-Scans", "https://sensescans.com", "en", "/reader")
+class SenseScans : FoolSlide("Sense-Scans", "http://sensescans.com", "en", "/reader")
 
 class KireiCake : FoolSlide("Kirei Cake", "https://reader.kireicake.com", "en")
 
@@ -156,3 +157,5 @@ class ShoujoHearts : FoolSlide("ShoujoHearts", "http://shoujohearts.com", "en", 
         return manga
     }
 }
+
+class ZandynoFansub : FoolSlide("Zandy no Fansub", "http://zandynofansub.aishiteru.org", "en", "/reader")

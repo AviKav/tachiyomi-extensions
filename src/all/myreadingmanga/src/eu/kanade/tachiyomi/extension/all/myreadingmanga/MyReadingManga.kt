@@ -8,7 +8,9 @@ import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.*
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 open class MyReadingManga(override val lang: String) : ParsedHttpSource() {
@@ -65,30 +67,21 @@ open class MyReadingManga(override val lang: String) : ParsedHttpSource() {
     override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+
+        val query2 = URLEncoder.encode(query, "UTF-8")
         val uri = Uri.parse("$baseUrl/search/").buildUpon()
-        uri.appendQueryParameter("search", query)
+                .appendEncodedPath(query2)
+                .appendPath("page")
+                .appendPath("$page")
         return GET(uri.toString())
     }
 
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
+    override fun searchMangaParse(response: Response) = popularMangaParse(response)
 
-        val elements = document.select(searchMangaSelector())
-        var mangas = mutableListOf<SManga>()
-        for (element in elements) {
-            if (element.text().contains("[$lang", true)) {
-                mangas.add(searchMangaFromElement(element))
-            }
-        }
+    override fun searchMangaSelector() = popularMangaSelector()
 
-        return MangasPage(mangas, false)
-    }
-
-    override fun searchMangaSelector() = "div.results-by-facets div[id*=res]"
-
-    override fun searchMangaFromElement(element: Element) = buildManga(element.select("a").first(), element.select("img").first())
-
+    override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
     private fun buildManga(titleElement: Element, thumbnailElement: Element): SManga {
         val manga = SManga.create()
         manga.setUrlWithoutDomain(titleElement.attr("href"))
@@ -115,18 +108,20 @@ open class MyReadingManga(override val lang: String) : ParsedHttpSource() {
 
     //cleans up the name removing author and language from the title
     private fun cleanTitle(title: String) = title.substringBeforeLast("[").substringAfterLast("]").substringBeforeLast("(")
-
+    private fun cleanAuthor(title: String) = title.substringAfter("[").substringBefore("]")
 
     override fun mangaDetailsParse(document: Document): SManga {
         val manga = SManga.create()
-        manga.author = document.select(".entry-content p")?.find { it ->
-            it.text().contains("artist", true) || it.text().contains("author", true)
-        }?.text()?.substringAfter(":")
-
+        manga.author = cleanAuthor(document.select("h1").text())
+        manga.artist = cleanAuthor(document.select("h1").text())
         val glist = document.select(".entry-header p a[href*=genre]").map { it -> it.text() }
         manga.genre = glist.joinToString(", ")
-        manga.description = document.select("h1").text() + "\n" + (document.select(".entry-content blockquote")?.first()?.text() ?: "")
-        manga.status = SManga.UNKNOWN
+        manga.description = document.select("h1").text() + "\n" + document.select(".info-class")?.text()
+        manga.status = when (document.select("a[href*=status]")?.first()?.text()) {
+            "Ongoing" -> SManga.ONGOING
+            "Completed" -> SManga.COMPLETED
+            else -> SManga.UNKNOWN
+        }
         return manga
     }
 
@@ -136,14 +131,18 @@ open class MyReadingManga(override val lang: String) : ParsedHttpSource() {
         val document = response.asJsoup()
         val chapters = mutableListOf<SChapter>()
 
-        val date = parseDate(document.select(".entry-time").attr("datetime").substringBefore("T"))
+        val date = parseDate(document.select(".entry-time").text())
+        val mangaUrl = document.baseUri()
+        val chfirstname = document.select(".chapter-class a[href*=$mangaUrl]")?.first()?.text()?.ifEmpty { "Ch. 1" }?.capitalize() ?:"Ch. 1"
         //create first chapter since its on main manga page
-        chapters.add(createChapter("1", document.baseUri(), date))
+        chapters.add(createChapter("1", document.baseUri(), date, chfirstname))
         //see if there are multiple chapters or not
         document.select(chapterListSelector())?.let { it ->
             it.forEach {
                 if (!it.text().contains("Next »", true)) {
-                    chapters.add(createChapter(it.text(), document.baseUri(), date))
+                    val pageNumber = it.text()
+                    val chname = document.select(".chapter-class a[href$=/$pageNumber/]")?.text()?.ifEmpty { "Ch. $pageNumber" }?.capitalize() ?:"Ch. $pageNumber"
+                    chapters.add(createChapter(it.text(), document.baseUri(), date, chname))
                 }
             }
         }
@@ -153,13 +152,13 @@ open class MyReadingManga(override val lang: String) : ParsedHttpSource() {
     }
 
     private fun parseDate(date: String): Long {
-        return SimpleDateFormat("yyyy-MM-dd").parse(date).time
+        return SimpleDateFormat("MMM dd, yyyy", Locale.US ).parse(date).time
     }
 
-    private fun createChapter(pageNumber: String, mangaUrl: String, date: Long): SChapter {
+    private fun createChapter(pageNumber: String, mangaUrl: String, date: Long, chname: String): SChapter {
         val chapter = SChapter.create()
         chapter.setUrlWithoutDomain("$mangaUrl/$pageNumber")
-        chapter.name = "Ch. $pageNumber"
+        chapter.name = chname
         chapter.date_upload = date
         return chapter
     }
